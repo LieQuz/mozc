@@ -45,6 +45,7 @@
 #include "base/win32/wide_char.h"
 #include "protocol/commands.pb.h"
 #include "protocol/renderer_command.pb.h"
+#include "renderer/win32/win32_dpi_util.h"
 #include "renderer/win32/win32_font_util.h"
 #include "renderer/win32/win32_image_util.h"
 #include "renderer/win32/win32_renderer_util.h"
@@ -101,7 +102,11 @@ class IndicatorWindow::WindowImpl
                          IndicatorWindowTraits> {
  public:
   DECLARE_WND_CLASS_EX(kIndicatorWindowClassName, 0, COLOR_WINDOW);
-  WindowImpl() : alpha_(255), dpi_scaling_(GetDPIScaling()) {
+  WindowImpl()
+      : current_image_(nullptr),
+        alpha_(255),
+        dpi_scaling_(GetDPIScaling()),
+        current_mode_(commands::DIRECT) {
     sprites_.resize(commands::NUM_OF_COMPOSITIONS);
   }
   WindowImpl(const WindowImpl&) = delete;
@@ -138,24 +143,20 @@ class IndicatorWindow::WindowImpl
     const Status& status = command.application_info().indicator_info().status();
 
     alpha_ = 255;
-    current_image_ = sprites_[commands::DIRECT].bitmap.get();
-    CPoint offset = sprites_[commands::DIRECT].offset;
-    if (!status.has_activated() || !status.has_mode() || !status.activated()) {
-      current_image_ = sprites_[commands::DIRECT].bitmap.get();
-      offset = sprites_[commands::DIRECT].offset;
-    } else {
-      const int mode = status.mode();
-      switch (mode) {
+    current_mode_ = commands::DIRECT;
+    if (status.has_activated() && status.has_mode() && status.activated()) {
+      switch (status.mode()) {
         case commands::HIRAGANA:
         case commands::FULL_KATAKANA:
         case commands::HALF_ASCII:
         case commands::FULL_ASCII:
         case commands::HALF_KATAKANA:
-          current_image_ = sprites_[mode].bitmap.get();
-          offset = sprites_[mode].offset;
+          current_mode_ = status.mode();
           break;
       }
     }
+    current_image_ = sprites_[current_mode_].bitmap.get();
+    const CPoint offset = sprites_[current_mode_].offset;
     if (current_image_ == nullptr) {
       HideIndicator();
       return;
@@ -200,14 +201,22 @@ class IndicatorWindow::WindowImpl
 
   LRESULT OnCreate(LPCREATESTRUCT create_struct) {
     EnableOrDisableWindowForWorkaround();
+    ReloadSprites();
+    return 1;
+  }
+
+  void ReloadSprites() {
     constexpr int kModes[] = {
         commands::DIRECT,     commands::HIRAGANA,   commands::FULL_KATAKANA,
         commands::HALF_ASCII, commands::FULL_ASCII, commands::HALF_KATAKANA,
     };
+    dpi_scaling_ = GetDPIScaling();
     for (size_t i = 0; i < std::size(kModes); ++i) {
       LoadSprite(kModes[i]);
     }
-    return 1;
+    if (current_image_ != nullptr) {
+      current_image_ = sprites_[current_mode_].bitmap.get();
+    }
   }
 
   void OnTimer(UINT_PTR event_id) {
@@ -226,7 +235,13 @@ class IndicatorWindow::WindowImpl
     }
   }
 
-  void OnSettingChange(UINT flags, LPCTSTR /*lpszSection*/) {
+  void OnSettingChange(UINT flags, LPCTSTR section) {
+    if (section != nullptr && lstrcmpW(section, L"ImmersiveColorSet") == 0) {
+      ReloadSprites();
+      if (current_image_ != nullptr && IsWindowVisible()) {
+        UpdateWindow();
+      }
+    }
     switch (flags) {
       case SPI_SETACTIVEWINDOWTRACKING:
         EnableOrDisableWindowForWorkaround();
@@ -250,35 +265,35 @@ class IndicatorWindow::WindowImpl
   }
 
   void LoadSprite(int mode) {
+    const WindowsUiColors colors = GetWindowsUiColors();
     BalloonImage::BalloonImageInfo info;
-    LOGFONT logfont = GetMessageBoxLogFont(::GetDpiForSystem());
-    info.label_font = mozc::win32::WideToUtf8(logfont.lfFaceName);
+    if (const wchar_t* face = GetUiFontFaceName()) {
+      info.label_font = mozc::win32::WideToUtf8(face);
+    } else {
+      const LOGFONT logfont = GetMessageBoxLogFont(::GetDpiForSystem());
+      info.label_font = mozc::win32::WideToUtf8(logfont.lfFaceName);
+    }
 
-    info.frame_color = RGBColor(1, 122, 204);
-    info.blur_color = RGBColor(1, 122, 204);
+    info.inside_color = RGBColor(colors.background_r, colors.background_g,
+                                 colors.background_b);
+    info.frame_color =
+        RGBColor(colors.border_r, colors.border_g, colors.border_b);
+    info.label_color = RGBColor(colors.text_r, colors.text_g, colors.text_b);
+    info.blur_color = RGBColor(0, 0, 0);
     info.rect_width = ceil(dpi_scaling_ * 45.0);   // snap to pixel alignment
     info.rect_height = ceil(dpi_scaling_ * 45.0);  // snap to pixel alignment
-    info.corner_radius = dpi_scaling_ * 0.0;
-    info.tail_height = dpi_scaling_ * 5.0;
-    info.tail_width = dpi_scaling_ * 10.0;
-    info.blur_sigma = dpi_scaling_ * 3.0;
-    info.blur_alpha = 0.5;
-    info.frame_thickness = dpi_scaling_ * 1.0;
+    info.corner_radius = dpi_scaling_ * 8.0;
+    info.tail_height = 0.0;
+    info.tail_width = 0.0;
+    info.blur_sigma = dpi_scaling_ * 4.0;
+    info.blur_alpha = 0.35;
+    info.frame_thickness = std::max(1.0, dpi_scaling_);
     info.label_size = 13.0;  // no need to be scaled.
-    info.label_color = RGBColor(0, 0, 0);
     info.blur_offset_x = 0;
-    info.blur_offset_y = 0;
+    info.blur_offset_y = static_cast<int>(std::lround(dpi_scaling_ * 2.0));
 
     switch (mode) {
       case commands::DIRECT:
-        info.blur_sigma = dpi_scaling_ * 0.0;
-        info.frame_color = RGBColor(186, 186, 186);
-        info.label_color = RGBColor(0, 0, 0);
-        info.blur_sigma = dpi_scaling_ * 0.0;
-        info.frame_thickness = dpi_scaling_ * 1.0;
-        info.corner_radius = dpi_scaling_ * 0.0;
-        info.blur_offset_x = 0;
-        info.blur_offset_y = 0;
         info.label = "A";
         break;
       case commands::HIRAGANA:
@@ -324,6 +339,7 @@ class IndicatorWindow::WindowImpl
   CPoint top_left_;
   BYTE alpha_;
   double dpi_scaling_;
+  int current_mode_;
   std::vector<Sprite> sprites_;
 };
 

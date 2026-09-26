@@ -51,6 +51,7 @@
 #include "absl/log/log.h"
 #include "absl/types/span.h"
 #include "base/coordinates.h"
+#include "base/win32/wide_char.h"
 #include "protocol/renderer_style.pb.h"
 #include "renderer/win32/win32_dpi_util.h"
 #include "renderer/win32/win32_font_util.h"
@@ -69,6 +70,36 @@ CRect ToCRect(const Rect& rect) {
 
 COLORREF ToColorRef(const RendererStyle::RGBAColor& color) {
   return RGB(color.r(), color.g(), color.b());
+}
+
+const RendererStyle::TextStyle* TextStyleFor(TextRenderer::FONT_TYPE type,
+                                             const RendererStyle& style) {
+  switch (type) {
+    case TextRenderer::FONTSET_SHORTCUT:
+      return &style.shortcut_style();
+    case TextRenderer::FONTSET_CANDIDATE:
+      return &style.candidate_style();
+    case TextRenderer::FONTSET_DESCRIPTION:
+      return &style.description_style();
+    case TextRenderer::FONTSET_FOOTER_INDEX:
+    case TextRenderer::FONTSET_FOOTER_LABEL:
+      return &style.footer_style();
+    case TextRenderer::FONTSET_FOOTER_SUBLABEL:
+      return &style.footer_sub_label_style();
+    default:
+      return nullptr;
+  }
+}
+
+void ApplyStyleFontFace(LOGFONT* font, const RendererStyle::TextStyle& style) {
+  if (!style.has_font_name() || style.font_name().empty()) {
+    return;
+  }
+  const std::wstring face = mozc::win32::Utf8ToWide(style.font_name());
+  if (face.empty() || face.size() >= LF_FACESIZE) {
+    return;
+  }
+  wcscpy_s(font->lfFaceName, face.c_str());
 }
 
 COLORREF GetTextColor(TextRenderer::FONT_TYPE type, uint32_t dpi) {
@@ -104,6 +135,11 @@ COLORREF GetTextColor(TextRenderer::FONT_TYPE type, uint32_t dpi) {
 
 LOGFONT GetLogFont(TextRenderer::FONT_TYPE type, uint32_t dpi) {
   LOGFONT font = GetMessageBoxLogFont(dpi);
+  RendererStyle style;
+  GetScaledRendererStyle(&style, dpi);
+  if (const RendererStyle::TextStyle* text_style = TextStyleFor(type, style)) {
+    ApplyStyleFontFace(&font, *text_style);
+  }
 
   switch (type) {
     case TextRenderer::FONTSET_SHORTCUT: {
@@ -129,8 +165,6 @@ LOGFONT GetLogFont(TextRenderer::FONT_TYPE type, uint32_t dpi) {
 
   // TODO(horo): Not only infolist fonts but also candidate fonts
   //             should be created from RendererStyle
-  RendererStyle style;
-  GetScaledRendererStyle(&style, dpi);
   const auto& infostyle = style.infolist_style();
   switch (type) {
     case TextRenderer::FONTSET_INFOLIST_CAPTION: {

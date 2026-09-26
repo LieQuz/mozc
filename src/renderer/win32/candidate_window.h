@@ -80,6 +80,7 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   MESSAGE_HANDLER(WM_LBUTTONUP, OnLButtonUp)
   MESSAGE_HANDLER(WM_MOUSEMOVE, OnMouseMove)
   MESSAGE_HANDLER(WM_SETTINGCHANGE, OnSettingChange)
+  MESSAGE_HANDLER(WM_SIZE, OnSize)
   MESSAGE_HANDLER(WM_PAINT, OnPaint)
   MESSAGE_HANDLER(WM_PRINTCLIENT, OnPrintClient)
   END_MSG_MAP()
@@ -98,6 +99,7 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
   void OnPaint(HDC dc);
   void OnPrintClient(HDC dc, UINT uFlags);
   void OnSettingChange(UINT uFlags, LPCTSTR lpszSection);
+  void OnSize(UINT nType, CSize size);
 
   void set_mouse_moving(bool moving);
 
@@ -183,6 +185,12 @@ class CandidateWindow : public ATL::CWindowImpl<CandidateWindow, ATL::CWindow,
                                  BOOL& handled) {
     OnSettingChange(static_cast<UINT>(wparam),
                     reinterpret_cast<LPCTSTR>(lparam));
+    return 0;
+  }
+  inline LRESULT OnSize(UINT msg_id, WPARAM wparam, LPARAM lparam,
+                        BOOL& handled) {
+    OnSize(static_cast<UINT>(wparam),
+           CSize(GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)));
     return 0;
   }
   inline LRESULT OnPaint(UINT msg_id, WPARAM wparam, LPARAM lparam,

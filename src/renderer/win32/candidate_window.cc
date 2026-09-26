@@ -35,6 +35,8 @@
 #include <wil/resource.h>
 #include <windows.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <sstream>
@@ -210,6 +212,37 @@ void FillSolidRect(HDC dc, const RECT* rect, COLORREF color) {
 
 COLORREF ToColorRef(const RendererStyle::RGBAColor& color) {
   return RGB(color.r(), color.g(), color.b());
+}
+
+bool SameRgb(const RendererStyle::RGBAColor& left,
+             const RendererStyle::RGBAColor& right) {
+  return left.r() == right.r() && left.g() == right.g() && left.b() == right.b();
+}
+
+void FillRoundRect(HDC dc, const RECT& rect, int radius_px, COLORREF fill) {
+  if (rect.right <= rect.left || rect.bottom <= rect.top) {
+    return;
+  }
+  const int diameter = std::max(0, radius_px) * 2;
+  wil::unique_hpen pen(::CreatePen(PS_SOLID, 1, fill));
+  wil::unique_hbrush brush(::CreateSolidBrush(fill));
+  wil::unique_select_object old_pen(wil::SelectObject(dc, pen.get()));
+  wil::unique_select_object old_brush(wil::SelectObject(dc, brush.get()));
+  ::RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, diameter,
+              diameter);
+}
+
+void StrokeRoundRect(HDC dc, const RECT& rect, int radius_px, COLORREF border) {
+  if (rect.right <= rect.left || rect.bottom <= rect.top) {
+    return;
+  }
+  const int diameter = std::max(0, radius_px) * 2;
+  wil::unique_hpen pen(::CreatePen(PS_SOLID, 1, border));
+  wil::unique_select_object old_pen(wil::SelectObject(dc, pen.get()));
+  wil::unique_select_object old_brush(
+      wil::SelectObject(dc, ::GetStockObject(NULL_BRUSH)));
+  ::RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, diameter,
+              diameter);
 }
 
 }  // namespace
@@ -424,7 +457,27 @@ void CandidateWindow::DoPaint(HDC dc) {
   DrawFrame(dc);
 }
 
-void CandidateWindow::OnSettingChange(UINT uFlags, LPCTSTR /*lpszSection*/) {
+void CandidateWindow::OnSize(UINT /*nType*/, CSize size) {
+  if (size.cx <= 0 || size.cy <= 0) {
+    return;
+  }
+  const int radius = GetWindowCornerRadiusPx(dpi_);
+  HRGN region = ::CreateRoundRectRgn(0, 0, size.cx + 1, size.cy + 1,
+                                     radius * 2, radius * 2);
+  if (region == nullptr) {
+    return;
+  }
+  if (::SetWindowRgn(m_hWnd, region, TRUE) == 0) {
+    ::DeleteObject(region);
+  }
+}
+
+void CandidateWindow::OnSettingChange(UINT uFlags, LPCTSTR lpszSection) {
+  if (lpszSection != nullptr && lstrcmpW(lpszSection, L"ImmersiveColorSet") == 0) {
+    UpdateDpiDependentResources();
+    text_renderer_->OnThemeChanged();
+    Invalidate(FALSE);
+  }
   // Since TextRenderer uses dialog font to render,
   // we monitor font-related parameters to know when the font style is changed.
   switch (uFlags) {
@@ -552,8 +605,9 @@ void CandidateWindow::UpdateLayout(
 
   // put a padding in COLUMN_GAP1.
   // the width is determined to be equal to the width of " ".
-  const Size gap1_size =
+  Size gap1_size =
       text_renderer_->MeasureString(TextRenderer::FONTSET_CANDIDATE, L" ");
+  gap1_size.width += GetColumnGapPx(dpi_);
   table_layout_->EnsureCellSize(COLUMN_GAP1, gap1_size);
 
   bool description_found = false;
@@ -603,8 +657,9 @@ void CandidateWindow::UpdateLayout(
   // Put a padding in COLUMN_GAP2.
   // We use wide padding if there is any description column.
   const wchar_t* gap2_string = (description_found ? L"   " : L" ");
-  const Size gap2_size = text_renderer_->MeasureString(
+  Size gap2_size = text_renderer_->MeasureString(
       TextRenderer::FONTSET_CANDIDATE, gap2_string);
+  gap2_size.width += GetColumnGapPx(dpi_);
   table_layout_->EnsureCellSize(COLUMN_GAP2, gap2_size);
 
   table_layout_->FreezeLayout();
@@ -742,12 +797,17 @@ void CandidateWindow::DrawFooter(HDC dc) {
       footer_rect.Left(), footer_rect.Top() + footer_separator_height,
       footer_rect.Width(), footer_rect.Height() - footer_separator_height);
 
-  // Draw gradient rect in the footer area
+  // Footer fill is flat. A vertical gradient is kept only when the style
+  // still asks for two different colors.
   {
     const RendererStyle::RGBAColor& footer_top_color =
         style_.footer_top_color();
     const RendererStyle::RGBAColor& footer_bottom_color =
         style_.footer_bottom_color();
+    if (SameRgb(footer_top_color, footer_bottom_color)) {
+      const CRect footer_crect = ToCRect(footer_content_rect);
+      FillSolidRect(dc, &footer_crect, ToColorRef(footer_top_color));
+    } else {
     const auto to_color16 = [](double val) -> COLOR16 {
       return static_cast<COLOR16>(val * 256);
     };
@@ -767,6 +827,7 @@ void CandidateWindow::DrawFooter(HDC dc) {
     GRADIENT_RECT indices[] = {{0, 1}};
     ::GradientFill(dc, &vertices[0], std::size(vertices), &indices[0],
                    std::size(indices), GRADIENT_FILL_RECT_V);
+    }
   }
 
   int left_used = 0;
@@ -835,14 +896,15 @@ void CandidateWindow::DrawSelectedRect(HDC dc) {
       focused_array_index < candidate_window_->candidate_size()) {
     (void)candidate_window_->candidate(focused_array_index);
 
-    const CRect selected_rect =
+    CRect selected_rect =
         ToCRect(table_layout_->GetRowRect(focused_array_index));
-    FillSolidRect(dc, &selected_rect,
+    const int inset = std::max(1, static_cast<int>(std::lround(
+                                      2 * GetDPIScalingFactor(dpi_))));
+    selected_rect.DeflateRect(inset, inset);
+    const int radius =
+        std::max(2, GetWindowCornerRadiusPx(dpi_) / 2);
+    FillRoundRect(dc, selected_rect, radius,
                   ToColorRef(style_.focused_background_color()));
-
-    ::SetDCBrushColor(dc, ToColorRef(style_.focused_border_color()));
-    ::FrameRect(dc, &selected_rect,
-                static_cast<HBRUSH>(::GetStockObject(DC_BRUSH)));
   }
 }
 
@@ -873,11 +935,8 @@ void CandidateWindow::DrawBackground(HDC dc) {
 void CandidateWindow::DrawFrame(HDC dc) {
   const Rect client_rect(Point(0, 0), table_layout_->GetTotalSize());
   const CRect client_crect = ToCRect(client_rect);
-
-  // DC brush is available in Windows 2000 and later.
-  ::SetDCBrushColor(dc, ToColorRef(style_.border_color()));
-  ::FrameRect(dc, &client_crect,
-              static_cast<HBRUSH>(::GetStockObject(DC_BRUSH)));
+  StrokeRoundRect(dc, client_crect, GetWindowCornerRadiusPx(dpi_),
+                  ToColorRef(style_.border_color()));
 }
 
 void CandidateWindow::set_mouse_moving(bool moving) { mouse_moving_ = moving; }
