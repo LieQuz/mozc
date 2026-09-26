@@ -44,7 +44,14 @@ using mozc::commands::Information;
 using mozc::commands::InformationList;
 using mozc::renderer::RendererStyle;
 using mozc::renderer::RendererStyleHandler;
+using mozc::renderer::mac::MacTextTone;
 using mozc::renderer::mac::MacViewUtil;
+
+constexpr CGFloat kInfolistTitleFontSize = 13.0;
+constexpr CGFloat kInfolistDescriptionFontSize = 12.0;
+constexpr CGFloat kInfolistCaptionFontSize = 12.0;
+constexpr CGFloat kInfolistCornerPadding = 8.0;
+constexpr CGFloat kSelectionRadius = 6.0;
 
 // Private method declarations.
 @interface InfolistView ()
@@ -66,6 +73,9 @@ using mozc::renderer::mac::MacViewUtil;
     RendererStyle *style = new (std::nothrow) RendererStyle;
     if (style) {
       RendererStyleHandler::GetRendererStyle(style);
+      // Extra inset so caption and body text clear the rounded window corners.
+      // Wrapping still uses the same width formula in drawRow:.
+      style->mutable_infolist_style()->set_window_border(static_cast<int>(kInfolistCornerPadding));
     }
     style_ = style;
   }
@@ -84,6 +94,15 @@ using mozc::renderer::mac::MacViewUtil;
   return YES;
 }
 
+- (BOOL)isOpaque {
+  return NO;
+}
+
+- (void)viewDidChangeEffectiveAppearance {
+  [super viewDidChangeEffectiveAppearance];
+  [self setNeedsDisplay:YES];
+}
+
 #pragma mark drawing
 - (CGFloat)drawRow:(int)row ypos:(CGFloat)ypos draw_flag:(bool)draw_flag {
   const RendererStyle::InfolistStyle &infostyle = style_->infolist_style();
@@ -100,9 +119,10 @@ using mozc::renderer::mac::MacViewUtil;
   const NSSize desc_size = NSMakeSize(desc_width, 1000);
   const Information &info = usages.information(row);
 
-  NSAttributedString *title_string = MacViewUtil::ToNSAttributedString(info.title(), title_style);
-  NSAttributedString *desc_string =
-      MacViewUtil::ToNSAttributedString(info.description(), desc_style);
+  NSAttributedString *title_string = MacViewUtil::ToSystemAttributedString(
+      info.title(), kInfolistTitleFontSize, MacTextTone::kPrimary);
+  NSAttributedString *desc_string = MacViewUtil::ToSystemAttributedString(
+      info.description(), kInfolistDescriptionFontSize, MacTextTone::kSecondary);
   NSRect title_rect = [title_string boundingRectWithSize:title_size
                                                  options:NSStringDrawingUsesLineFragmentOrigin];
   NSRect desc_rect = [desc_string boundingRectWithSize:desc_size
@@ -121,36 +141,17 @@ using mozc::renderer::mac::MacViewUtil;
   desc_rect.origin.y = ypos + infostyle.row_rect_padding() + title_rect.size.height;
 
   if (usages.has_focused_index() && (row == usages.focused_index())) {
-    NSRect focused_rect = NSMakeRect(
-        infostyle.window_border(), ypos, infostyle.window_width() - infostyle.window_border() * 2,
-        title_rect.size.height + desc_rect.size.height + infostyle.row_rect_padding() * 2);
-    [MacViewUtil::ToNSColor(infostyle.focused_background_color()) set];
-    [NSBezierPath fillRect:focused_rect];
-    [MacViewUtil::ToNSColor(infostyle.focused_border_color()) set];
-    // Fix the border position.  Because a line should be drawn at the
-    // middle point of the pixel, origin should be shifted by 0.5 unit
-    // and the size should be shrinked by 1.0 unit.
-    focused_rect.origin.x += 0.5;
-    focused_rect.origin.y += 0.5;
-    focused_rect.size.width -= 1.0;
-    focused_rect.size.height -= 1.0;
-    [NSBezierPath strokeRect:focused_rect];
-  } else {
-    if (title_style.has_background_color()) {
-      NSRect rect = NSMakeRect(infostyle.window_border(), ypos,
-                               infostyle.window_width() - infostyle.window_border() * 2,
-                               title_rect.size.height + infostyle.row_rect_padding());
-      [MacViewUtil::ToNSColor(title_style.background_color()) set];
-      [NSBezierPath fillRect:rect];
-    }
-    if (desc_style.has_background_color()) {
-      NSRect rect = NSMakeRect(infostyle.window_border(),
-                               ypos + title_rect.size.height + infostyle.row_rect_padding(),
-                               infostyle.window_width() - infostyle.window_border() * 2,
-                               desc_rect.size.height + infostyle.row_rect_padding());
-      [MacViewUtil::ToNSColor(desc_style.background_color()) set];
-      [NSBezierPath fillRect:rect];
-    }
+    NSRect focused_rect =
+        NSMakeRect(infostyle.window_border() + 4.0, ypos + 1.0,
+                   infostyle.window_width() - infostyle.window_border() * 2 - 8.0, height - 2.0);
+    [[NSColor selectedContentBackgroundColor] set];
+    [[NSBezierPath bezierPathWithRoundedRect:focused_rect
+                                     xRadius:kSelectionRadius
+                                     yRadius:kSelectionRadius] fill];
+    title_string = MacViewUtil::AttributedStringWithForeground(
+        title_string, [NSColor selectedMenuItemTextColor]);
+    desc_string = MacViewUtil::AttributedStringWithForeground(desc_string,
+                                                              [NSColor selectedMenuItemTextColor]);
   }
   [title_string drawWithRect:title_rect options:NSStringDrawingUsesLineFragmentOrigin];
   [desc_string drawWithRect:desc_rect options:NSStringDrawingUsesLineFragmentOrigin];
@@ -170,14 +171,9 @@ using mozc::renderer::mac::MacViewUtil;
   if (draw_flag && infostyle.has_caption_string()) {
     const RendererStyle::TextStyle &caption_style = infostyle.caption_style();
     const int caption_height = infostyle.caption_height();
-    NSAttributedString *caption_string =
-        MacViewUtil::ToNSAttributedString(infostyle.caption_string(), caption_style);
-    NSRect rect =
-        NSMakeRect(infostyle.window_border(), ypos,
-                   infostyle.window_width() - infostyle.window_border() * 2, caption_height);
-    [MacViewUtil::ToNSColor(infostyle.caption_background_color()) set];
-    [NSBezierPath fillRect:rect];
-    rect = NSMakeRect(
+    NSAttributedString *caption_string = MacViewUtil::ToSystemAttributedString(
+        infostyle.caption_string(), kInfolistCaptionFontSize, MacTextTone::kSecondary);
+    NSRect rect = NSMakeRect(
         infostyle.window_border() + infostyle.caption_padding() + caption_style.left_padding(),
         ypos + infostyle.caption_padding(),
         infostyle.window_width() - infostyle.window_border() * 2, caption_height);
@@ -188,13 +184,6 @@ using mozc::renderer::mac::MacViewUtil;
     ypos += [self drawRow:i ypos:ypos draw_flag:draw_flag];
   }
   ypos += infostyle.window_border();
-
-  if (draw_flag) {
-    [MacViewUtil::ToNSColor(infostyle.border_color()) set];
-    [NSBezierPath setDefaultLineWidth:infostyle.window_border()];
-    [NSBezierPath setDefaultLineJoinStyle:NSLineJoinStyleMiter];
-    [NSBezierPath strokeRect:NSMakeRect(0.5, 0.5, infostyle.window_width() - 1, ypos - 1)];
-  }
 
   return NSMakeSize(infostyle.window_width(), ypos);
 }

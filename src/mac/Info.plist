@@ -34,6 +34,8 @@
 		<dict>
 			<key>com.apple.inputmethod.Japanese</key>
 			<dict>
+				<key>TISIconIsTemplate</key>
+				<true/>
 				<key>TISInputSourceID</key>
 				<string>${PRODUCT_BUNDLE_IDENTIFIER}.base</string>
 				<key>TISIntendedLanguage</key>

@@ -87,6 +87,34 @@ NSAttributedString *MacViewUtil::ToNSAttributedString(const std::string &str,
   }
   return [[NSAttributedString alloc] initWithString:nsstr attributes:attr];
 }
+
+NSAttributedString *MacViewUtil::ToSystemAttributedString(const std::string &str,
+                                                          CGFloat font_size, MacTextTone tone) {
+  NSString *nsstr = [NSString stringWithUTF8String:str.c_str()];
+  if (nsstr == nil) {
+    nsstr = @"";
+  }
+  NSFont *font = [NSFont systemFontOfSize:font_size];
+  NSColor *color =
+      (tone == MacTextTone::kSecondary) ? [NSColor secondaryLabelColor] : [NSColor labelColor];
+  NSDictionary *attr = @{
+    NSFontAttributeName : font,
+    NSForegroundColorAttributeName : color,
+  };
+  return [[NSAttributedString alloc] initWithString:nsstr attributes:attr];
+}
+
+NSAttributedString *MacViewUtil::AttributedStringWithForeground(NSAttributedString *text,
+                                                                NSColor *color) {
+  if (text == nil || color == nil) {
+    return text;
+  }
+  NSMutableAttributedString *copy = [text mutableCopy];
+  [copy addAttribute:NSForegroundColorAttributeName
+               value:color
+               range:NSMakeRange(0, copy.length)];
+  return copy;
+}
 }  // namespace mozc::renderer::mac
 }  // namespace mozc::renderer
 }  // namespace mozc

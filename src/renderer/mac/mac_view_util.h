@@ -41,6 +41,12 @@ namespace mozc {
 namespace renderer {
 namespace mac {
 
+// Semantic text tone used by the macOS candidate and infolist windows.
+enum class MacTextTone {
+  kPrimary,
+  kSecondary,
+};
+
 // this is pure static class
 class MacViewUtil {
  public:
@@ -50,6 +56,16 @@ class MacViewUtil {
   static NSAttributedString *ToNSAttributedString(
       const std::string &str,
       const mozc::renderer::RendererStyle::TextStyle &style);
+
+  // System font and a dynamic label color. The color resolves again when the
+  // view's appearance changes.
+  static NSAttributedString *ToSystemAttributedString(const std::string &str,
+                                                      CGFloat font_size,
+                                                      MacTextTone tone);
+
+  // Returns a copy of |text| drawn with |color|.
+  static NSAttributedString *AttributedStringWithForeground(
+      NSAttributedString *text, NSColor *color);
 
   static NSPoint ToNSPoint(const mozc::Point &point);
 

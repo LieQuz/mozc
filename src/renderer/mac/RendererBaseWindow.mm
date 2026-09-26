@@ -43,6 +43,8 @@ namespace mozc {
 namespace renderer {
 namespace mac {
 
+constexpr CGFloat kWindowCornerRadius = 10.0;
+
 RendererBaseWindow::RendererBaseWindow() : window_level_(NSPopUpMenuWindowLevel) {}
 
 void RendererBaseWindow::InitWindow() {
@@ -50,19 +52,35 @@ void RendererBaseWindow::InitWindow() {
     LOG(ERROR) << "window is already initialized.";
     return;
   }
-  const NSUInteger style_mask = NSWindowStyleMaskUtilityWindow | NSWindowStyleMaskDocModalWindow |
-                                NSWindowStyleMaskNonactivatingPanel;
+  const NSUInteger style_mask =
+      NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel;
   window_ = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 1, 1)
                                        styleMask:style_mask
                                          backing:NSBackingStoreBuffered
                                            defer:YES];
   ResetView();
-  [window_ setContentView:view_];
+
+  NSVisualEffectView *effect_view =
+      [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
+  effect_view.material = NSVisualEffectMaterialMenu;
+  effect_view.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+  effect_view.state = NSVisualEffectStateActive;
+  effect_view.wantsLayer = YES;
+  effect_view.layer.cornerRadius = kWindowCornerRadius;
+  effect_view.layer.masksToBounds = YES;
+
+  view_.frame = effect_view.bounds;
+  view_.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  [effect_view addSubview:view_];
+
+  [window_ setContentView:effect_view];
+  [window_ setOpaque:NO];
+  [window_ setBackgroundColor:NSColor.clearColor];
+  [window_ setHasShadow:YES];
   [window_ setDisplaysWhenScreenProfileChanges:YES];
   [window_ makeKeyAndOrderFront:nil];
   [window_ setFloatingPanel:YES];
   [window_ setWorksWhenModal:YES];
-  [window_ setBackgroundColor:NSColor.whiteColor];
   [window_ setReleasedWhenClosed:NO];
   [window_ setLevel:window_level_];
   [window_ orderOut:window_];
@@ -89,6 +107,7 @@ void RendererBaseWindow::Show() {
     InitWindow();
   }
   [window_ orderFront:window_];
+  [window_ invalidateShadow];
 }
 
 bool RendererBaseWindow::IsVisible() {
@@ -114,6 +133,7 @@ void RendererBaseWindow::ResizeWindow(int32_t width, int32_t height) {
   rect.size.width = width;
   rect.size.height = height;
   [window_ setFrame:rect display:FALSE];
+  [window_ invalidateShadow];
 }
 
 void RendererBaseWindow::SetWindowLevel(NSInteger window_level) {
