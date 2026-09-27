@@ -37,3 +37,25 @@ The entries in this file are used to filter out the entries in the dictionary.
 * `key` and `value` are the regexp patterns of words to be removed.
 * Each line is extended to the following regexp pattern:
   + `'^{key}\t\\d+\t\\d+\t\\d+\t{value}(\t.*)?\n$'`
+
+## dictionary_ut_*.txt
+
+Additional system-dictionary entries merged from the Mozc UT dictionaries.
+Words already present in `dictionary0*.txt` are omitted. Every added entry uses
+the `名詞,一般` POS id. Costs are the ones shipped by each UT dictionary, which
+are high enough that an existing common word still wins a shared reading.
+
+Sources, via https://github.com/utuhiro78/merge-ut-dictionaries :
+
+*   [mozcdic-ut-jawiki](https://github.com/utuhiro78/mozcdic-ut-jawiki): CC BY-SA
+*   [mozcdic-ut-neologd](https://github.com/utuhiro78/mozcdic-ut-neologd): see
+    mecab-ipadic-NEologd `COPYING`
+*   [mozcdic-ut-personal-names](https://github.com/utuhiro78/mozcdic-ut-personal-names):
+    Apache License 2.0
+*   [mozcdic-ut-place-names](https://github.com/utuhiro78/mozcdic-ut-place-names):
+    Japan Post postal-code data, public domain
+*   [mozcdic-ut-sudachidict](https://github.com/utuhiro78/mozcdic-ut-sudachidict):
+    Apache License 2.0
+
+Regenerate with `src/dictionary/import_ut_dictionary.py`, then split the output
+into these files. They are inputs of `:base_dictionary_data`.
