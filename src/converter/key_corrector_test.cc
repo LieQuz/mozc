@@ -500,5 +500,23 @@ TEST(KeyCorrectorTest, Bug3046266Test) {
   }
 }
 
+TEST(KeyCorrectorTest, TrailingHaWaAndLongVowel) {
+  {
+    KeyCorrector corrector("これは", KeyCorrector::ROMAN, 0);
+    EXPECT_TRUE(corrector.IsAvailable());
+    EXPECT_EQ(corrector.corrected_key(), "これわ");
+    EXPECT_FALSE(corrector.GetCorrectedPrefix(0).empty());
+  }
+  {
+    // A non-final は is left alone.
+    KeyCorrector corrector("はなす", KeyCorrector::ROMAN, 0);
+    EXPECT_EQ(corrector.corrected_key(), "はなす");
+  }
+  {
+    KeyCorrector corrector("こーひー", KeyCorrector::ROMAN, 0);
+    EXPECT_EQ(corrector.corrected_key(), "こーひう");
+  }
+}
+
 }  // namespace
 }  // namespace mozc

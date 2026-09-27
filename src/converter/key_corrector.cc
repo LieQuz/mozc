@@ -359,6 +359,43 @@ bool RewriteYu(size_t key_pos, absl::string_view prefix, size_t* mblen,
 
   return true;
 }
+
+// Trailing topic/object particle confusion: は <-> わ. Only the last
+// character is rewritten so a mid-word は does not spawn an alternate key.
+bool RewriteTrailingHaWa(size_t key_pos, absl::string_view prefix,
+                         size_t* mblen, std::string* output) {
+  (void)key_pos;
+  const char32_t codepoint = Util::Utf8ToCodepoint(prefix, mblen);
+  if (*mblen == 0 || *mblen != prefix.size()) {
+    *mblen = 0;
+    return false;
+  }
+  char32_t replaced = 0;
+  if (codepoint == 0x306F) {  // "は"
+    replaced = 0x308F;        // "わ"
+  } else if (codepoint == 0x308F) {
+    replaced = 0x306F;
+  } else {
+    *mblen = 0;
+    return false;
+  }
+  Util::CodepointToUtf8Append(replaced, output);
+  return true;
+}
+
+// A trailing long-vowel mark is a common romaji slip. Replace it with う so
+// the corrected key competes in the lattice under the usual penalty.
+bool RewriteTrailingLongVowel(size_t key_pos, absl::string_view prefix,
+                              size_t* mblen, std::string* output) {
+  (void)key_pos;
+  const char32_t codepoint = Util::Utf8ToCodepoint(prefix, mblen);
+  if (codepoint != 0x30FC || *mblen == 0 || *mblen != prefix.size()) {
+    *mblen = 0;
+    return false;
+  }
+  Util::CodepointToUtf8Append(0x3046, output);  // "う"
+  return true;
+}
 }  // namespace
 
 size_t KeyCorrector::GetCorrectedPosition(const size_t original_key_pos) const {
@@ -403,7 +440,10 @@ bool KeyCorrector::Init(absl::string_view key, InputMode mode,
          !RewriteYu(key_pos, prefix, &mblen, &corrected_key_) &&
          !RewriteNI(key_pos, prefix, &mblen, &corrected_key_) &&
          !RewriteSmallTSU(key_pos, prefix, &mblen, &corrected_key_) &&
-         !RewriteM(key_pos, prefix, &mblen, &corrected_key_))) {
+         !RewriteM(key_pos, prefix, &mblen, &corrected_key_) &&
+         !RewriteTrailingHaWa(key_pos, prefix, &mblen, &corrected_key_) &&
+         !RewriteTrailingLongVowel(key_pos, prefix, &mblen,
+                                   &corrected_key_))) {
       const char32_t codepoint = Util::Utf8ToCodepoint(prefix, &mblen);
       Util::CodepointToUtf8Append(codepoint, &corrected_key_);
     }

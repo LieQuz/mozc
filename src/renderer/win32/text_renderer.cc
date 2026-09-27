@@ -143,8 +143,8 @@ LOGFONT GetLogFont(TextRenderer::FONT_TYPE type, uint32_t dpi) {
 
   switch (type) {
     case TextRenderer::FONTSET_SHORTCUT: {
-      font.lfHeight += (font.lfHeight > 0 ? 3 : -3);
-      font.lfWeight = FW_BOLD;
+      font.lfHeight += (font.lfHeight > 0 ? 1 : -1);
+      font.lfWeight = FW_NORMAL;
       return font;
     }
     case TextRenderer::FONTSET_CANDIDATE: {
@@ -285,15 +285,17 @@ class GdiTextRenderer : public TextRenderer {
                   FONT_TYPE font_type) const override {
     std::vector<TextRenderingInfo> infolist;
     infolist.emplace_back(std::wstring(text), rect);
-    RenderTextList(dc, infolist, font_type);
+    RenderTextList(dc, infolist, font_type, CLR_INVALID);
   }
 
   void RenderTextList(HDC dc,
                       const absl::Span<const TextRenderingInfo> display_list,
-                      FONT_TYPE font_type) const override {
+                      FONT_TYPE font_type, COLORREF color) const override {
     const auto& render_info = render_info_[font_type];
     const auto old_font = wil::SelectObject(dc, render_info.font.get());
-    const auto previous_color = ::SetTextColor(dc, render_info.color);
+    const COLORREF text_color =
+        color == CLR_INVALID ? render_info.color : color;
+    const auto previous_color = ::SetTextColor(dc, text_color);
     for (const TextRenderingInfo& info : display_list) {
       CRect rect = ToCRect(info.rect);
       ::DrawTextW(dc, info.text.data(), info.text.size(), &rect,
@@ -406,12 +408,12 @@ class DirectWriteTextRenderer : public TextRenderer {
                   FONT_TYPE font_type) const override {
     std::vector<TextRenderingInfo> infolist;
     infolist.emplace_back(std::wstring(text), rect);
-    RenderTextList(dc, infolist, font_type);
+    RenderTextList(dc, infolist, font_type, CLR_INVALID);
   }
 
   void RenderTextList(HDC dc,
                       const absl::Span<const TextRenderingInfo> display_list,
-                      FONT_TYPE font_type) const override {
+                      FONT_TYPE font_type, COLORREF color) const override {
     constexpr size_t kMaxTrial = 3;
     size_t trial = 0;
     while (true) {
@@ -420,7 +422,8 @@ class DirectWriteTextRenderer : public TextRenderer {
         // This is not a recoverable error.
         return;
       }
-      const HRESULT hr = RenderTextListImpl(dc, display_list, font_type);
+      const HRESULT hr =
+          RenderTextListImpl(dc, display_list, font_type, color);
       if (hr == D2DERR_RECREATE_TARGET && trial < kMaxTrial) {
         // This is a recoverable error just by recreating the render target.
         dc_render_target_.reset();
@@ -435,7 +438,7 @@ class DirectWriteTextRenderer : public TextRenderer {
 
   HRESULT RenderTextListImpl(
       HDC dc, const absl::Span<const TextRenderingInfo> display_list,
-      FONT_TYPE font_type) const {
+      FONT_TYPE font_type, COLORREF color) const {
     CRect total_rect;
     for (const auto& item : display_list) {
       const auto& item_rect = ToCRect(item.rect);
@@ -448,8 +451,10 @@ class DirectWriteTextRenderer : public TextRenderer {
       return hr;
     }
     wil::com_ptr_nothrow<ID2D1SolidColorBrush> brush;
-    hr = dc_render_target_->CreateSolidColorBrush(
-        ToD2DColor(render_info_[font_type].color), brush.put());
+    const COLORREF text_color =
+        color == CLR_INVALID ? render_info_[font_type].color : color;
+    hr = dc_render_target_->CreateSolidColorBrush(ToD2DColor(text_color),
+                                                  brush.put());
     if (FAILED(hr)) {
       return hr;
     }

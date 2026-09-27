@@ -44,6 +44,7 @@
 #include "converter/candidate_filter.h"
 #include "converter/connector.h"
 #include "converter/lattice.h"
+#include "converter/lexical_transition_bonus.h"
 #include "converter/node.h"
 #include "converter/segmenter.h"
 #include "converter/segments.h"
@@ -106,7 +107,8 @@ class NBestGenerator {
                  const Segmenter& segmenter, TConnector& connector,
                  const dictionary::PosMatcher& pos_matcher,
                  const Lattice& lattice,
-                 const SuggestionFilter& suggestion_filter);
+                 const SuggestionFilter& suggestion_filter,
+                 const LexicalTransitionBonus::Snapshot* lexical = nullptr);
   NBestGenerator(const NBestGenerator&) = delete;
   NBestGenerator& operator=(const NBestGenerator&) = delete;
   ~NBestGenerator() = default;
@@ -220,6 +222,9 @@ class NBestGenerator {
   TConnector& connector_;
   const dictionary::PosMatcher& pos_matcher_;
   const Lattice& lattice_;
+  // Empty when no surface bonus is installed. Held by value so each transition
+  // does not lock.
+  LexicalTransitionBonus::Snapshot lexical_;
 
   const Node* absl_nullable begin_node_ = nullptr;
   const Node* absl_nullable end_node_ = nullptr;

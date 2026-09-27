@@ -35,7 +35,9 @@
 #include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "converter/connector.h"
+#include "converter/lexical_transition_bonus.h"
 #include "converter/segmenter.h"
+#include "converter/word_ngram.h"
 #include "data_manager/data_manager.h"
 #include "dictionary/dictionary_interface.h"
 #include "dictionary/pos_group.h"
@@ -77,6 +79,16 @@ class Modules {
   }
 
   const Connector& GetConnector() const { return connector_; }
+
+  LexicalTransitionBonus& GetLexicalTransitionBonus() const {
+    DCHECK(lexical_transition_bonus_);
+    return *lexical_transition_bonus_;
+  }
+
+  const WordNgram& GetWordNgram() const {
+    DCHECK(word_ngram_);
+    return *word_ngram_;
+  }
 
   const Segmenter& GetSegmenter() const {
     DCHECK(segmenter_);
@@ -140,6 +152,8 @@ class Modules {
   std::unique_ptr<const dictionary::PosMatcher> pos_matcher_;
   std::unique_ptr<const dictionary::PosIdMap> pos_id_map_;
   Connector connector_;
+  std::unique_ptr<LexicalTransitionBonus> lexical_transition_bonus_;
+  std::unique_ptr<WordNgram> word_ngram_;
   std::unique_ptr<const Segmenter> segmenter_;
   std::unique_ptr<dictionary::UserDictionaryInterface> user_dictionary_;
   std::unique_ptr<dictionary::DictionaryInterface> suffix_dictionary_;

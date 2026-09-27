@@ -92,6 +92,14 @@ class DataManager {
 
   virtual absl::string_view GetConnectorData() const;
 
+  // Optional surface-bigram bonus table. Empty when the dataset has no "lexb"
+  // section.
+  virtual absl::string_view GetLexicalBonusData() const;
+
+  // Optional word n-gram bonus table. Empty when the dataset has no "ngrm"
+  // section.
+  virtual absl::string_view GetWordNgramData() const;
+
   virtual absl::string_view GetSystemDictionaryData() const;
 
   virtual absl::Span<const uint32_t> GetSuggestionFilterData() const;
@@ -187,6 +195,8 @@ class DataManager {
   absl::string_view user_pos_token_array_data_;
   absl::string_view user_pos_string_array_data_;
   absl::string_view connection_data_;
+  absl::string_view lexical_bonus_data_;
+  absl::string_view word_ngram_data_;
   absl::string_view dictionary_data_;
   absl::string_view suggestion_filter_data_;
   absl::string_view collocation_data_;

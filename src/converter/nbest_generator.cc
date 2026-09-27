@@ -51,6 +51,7 @@
 #include "converter/connector.h"
 #include "converter/inner_segment.h"
 #include "converter/lattice.h"
+#include "converter/lexical_transition_bonus.h"
 #include "converter/node.h"
 #include "converter/segmenter.h"
 #include "converter/segments.h"
@@ -115,12 +116,15 @@ template <typename TConnector>
 NBestGenerator<TConnector>::NBestGenerator(
     const UserDictionaryInterface& user_dictionary, const Segmenter& segmenter,
     TConnector& connector, const PosMatcher& pos_matcher,
-    const Lattice& lattice, const SuggestionFilter& suggestion_filter)
+    const Lattice& lattice, const SuggestionFilter& suggestion_filter,
+    const LexicalTransitionBonus::Snapshot* lexical)
     : user_dictionary_(user_dictionary),
       segmenter_(segmenter),
       connector_(connector),
       pos_matcher_(pos_matcher),
       lattice_(lattice),
+      lexical_(lexical == nullptr ? LexicalTransitionBonus::Snapshot()
+                                  : *lexical),
       arena_(kArenaChunkSize),
       filter_(user_dictionary_, pos_matcher, suggestion_filter) {
   if (!lattice_.has_lattice()) {
@@ -492,8 +496,11 @@ bool NBestGenerator<TConnector>::Next(const ConversionOptions& options,
       //  2. The cost diff of 'LEFT_EDGE' is decided only by
       //     transition_cost for lnode.
       // Actually, checking for each rid once is enough.
-      const bool can_omit_search =
-          lnode->rid == begin_node_->rid && lnode != begin_node_;
+      // Omission is valid only while transition cost depends on rid alone.
+      // A surface bonus can prefer another node with the same rid.
+      const bool can_omit_search = lexical_.empty() &&
+                                   lnode->rid == begin_node_->rid &&
+                                   lnode != begin_node_;
       if (is_left_edge && can_omit_search) {
         continue;
       }
@@ -751,7 +758,8 @@ int NBestGenerator<TConnector>::GetTransitionCost(const Node& lnode,
     return kInvalidPenaltyCost;
   }
   connector_.ResetCacheIfNecessary(rnode.lid);
-  return connector_.GetTransitionCost(lnode.rid, rnode.lid);
+  const int pos_cost = connector_.GetTransitionCost(lnode.rid, rnode.lid);
+  return lexical_.Apply(pos_cost, lnode.value, rnode.value);
 }
 
 template class NBestGenerator<CachingConnector<true>>;

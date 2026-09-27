@@ -216,6 +216,12 @@ absl::Status DataManager::InitFromReader(const DataSetReader& reader) {
   if (!reader.Get("conn", &connection_data_)) {
     return absl::NotFoundError("Cannot find a connection data");
   }
+  if (!reader.Get("lexb", &lexical_bonus_data_)) {
+    lexical_bonus_data_ = absl::string_view();
+  }
+  if (!reader.Get("ngrm", &word_ngram_data_)) {
+    word_ngram_data_ = absl::string_view();
+  }
   if (!reader.Get("dict", &dictionary_data_)) {
     return absl::NotFoundError("Cannot find a dictionary data");
   }
@@ -475,6 +481,14 @@ absl::Status DataManager::InitUserPosManagerDataFromFile(
 
 absl::string_view DataManager::GetConnectorData() const {
   return connection_data_;
+}
+
+absl::string_view DataManager::GetLexicalBonusData() const {
+  return lexical_bonus_data_;
+}
+
+absl::string_view DataManager::GetWordNgramData() const {
+  return word_ngram_data_;
 }
 
 absl::string_view DataManager::GetSystemDictionaryData() const {

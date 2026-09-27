@@ -348,6 +348,148 @@ mozc_cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
+        "//converter:lexical_transition_bonus",
+    ],
+)
+
+mozc_cc_library(
+    name = "lexical_transition_bonus",
+    srcs = ["lexical_transition_bonus.cc"],
+    hdrs = ["lexical_transition_bonus.h"],
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//base:japanese_util",
+        "@com_google_absl//absl/container:flat_hash_map",
+        "@com_google_absl//absl/hash",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+mozc_cc_test(
+    name = "lexical_transition_bonus_test",
+    size = "small",
+    srcs = ["lexical_transition_bonus_test.cc"],
+    deps = [
+        ":lexical_transition_bonus",
+        "//testing:gunit_main",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_library(
+    name = "word_ngram",
+    srcs = ["word_ngram.cc"],
+    hdrs = ["word_ngram.h"],
+    visibility = ["//:__subpackages__"],
+    deps = [
+        ":lexical_transition_bonus",
+        "//base:japanese_util",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+mozc_cc_test(
+    name = "word_ngram_test",
+    size = "small",
+    srcs = ["word_ngram_test.cc"],
+    deps = [
+        ":word_ngram",
+        "//testing:gunit_main",
+    ],
+)
+
+mozc_cc_library(
+    name = "global_path_selector",
+    srcs = ["global_path_selector.cc"],
+    hdrs = ["global_path_selector.h"],
+    visibility = ["//converter:__pkg__"],
+    deps = [
+        ":lattice",
+        ":lexical_transition_bonus",
+        ":node",
+        ":word_ngram",
+        "//request:options",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/functional:function_ref",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+mozc_cc_library(
+    name = "conversion_layer_eval",
+    srcs = ["conversion_layer_eval.cc"],
+    hdrs = ["conversion_layer_eval.h"],
+    visibility = ["//:__subpackages__"],
+    deps = [
+        ":lattice",
+        ":node",
+        ":segments",
+        "//base:util",
+        "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:span",
+    ],
+)
+
+mozc_cc_test(
+    name = "conversion_layer_eval_test",
+    size = "small",
+    srcs = ["conversion_layer_eval_test.cc"],
+    deps = [
+        ":conversion_layer_eval",
+        ":lattice",
+        ":node",
+        ":segments",
+        "//testing:gunit_main",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_binary(
+    name = "conversion_layer_eval_main",
+    srcs = ["conversion_layer_eval_main.cc"],
+    deps = [
+        ":conversion_layer_eval",
+        ":converter_interface",
+        ":immutable_converter",
+        ":lattice",
+        ":segments",
+        "//base:file_stream",
+        "//base:init_mozc",
+        "//base:system_util",
+        "//base/file:temp_dir",
+        "//composer",
+        "//composer:table",
+        "//engine",
+        "//engine:eval_engine_factory",
+        "//protocol:commands_cc_proto",
+        "//protocol:config_cc_proto",
+        "//request:conversion_request",
+        "//request:options",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+mozc_cc_test(
+    name = "global_path_selector_test",
+    size = "small",
+    srcs = ["global_path_selector_test.cc"],
+    deps = [
+        ":global_path_selector",
+        ":lattice",
+        ":lexical_transition_bonus",
+        ":node",
+        ":word_ngram",
+        "//testing:gunit_main",
     ],
 )
 
@@ -494,9 +636,11 @@ mozc_cc_library(
         ":attribute",
         ":caching_connector",
         ":connector",
+        ":global_path_selector",
         ":immutable_converter_interface",
         ":key_corrector",
         ":lattice",
+        ":lexical_transition_bonus",
         ":nbest_generator",
         ":node",
         ":node_allocator",
@@ -516,6 +660,7 @@ mozc_cc_library(
         "//prediction:suggestion_filter",
         "//protocol:commands_cc_proto",
         "//protocol:config_cc_proto",
+        ":word_ngram",
         "//request:options",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/base:nullability",
@@ -976,6 +1121,18 @@ mozc_cc_library(
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
     ],
+)
+
+mozc_py_binary(
+    name = "build_lexical_bonus",
+    srcs = ["build_lexical_bonus.py"],
+    visibility = ["//:__subpackages__"],
+)
+
+mozc_py_binary(
+    name = "reestimate_language_model",
+    srcs = ["reestimate_language_model.py"],
+    visibility = ["//:__subpackages__"],
 )
 
 mozc_py_binary(

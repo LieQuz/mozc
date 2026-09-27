@@ -46,7 +46,7 @@ double GetDPIScalingFactor(uint32_t dpi);
 uint32_t GetDpiForPoint(int x, int y);
 
 // Corner radius of the candidate window and mode indicator at |dpi|.
-// 8px at 96 DPI.
+// 12px at 96 DPI, close to a macOS panel.
 int GetWindowCornerRadiusPx(uint32_t dpi);
 
 // Extra space between shortcut, candidate, and description columns at |dpi|.

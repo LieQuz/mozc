@@ -58,6 +58,7 @@
 #include "converter/caching_connector.h"
 #include "converter/candidate.h"
 #include "converter/connector.h"
+#include "converter/global_path_selector.h"
 #include "converter/key_corrector.h"
 #include "converter/lattice.h"
 #include "converter/nbest_generator.h"
@@ -291,6 +292,8 @@ ImmutableConverter::ImmutableConverter(const engine::Modules& modules)
       pos_matcher_(modules.GetPosMatcher()),
       pos_group_(modules.GetPosGroup()),
       suggestion_filter_(modules.GetSuggestionFilter()),
+      lexical_bonus_(modules.GetLexicalTransitionBonus()),
+      word_ngram_(modules.GetWordNgram()),
       first_name_id_(pos_matcher_.GetFirstNameId()),
       last_name_id_(pos_matcher_.GetLastNameId()),
       number_id_(pos_matcher_.GetNumberId()),
@@ -754,7 +757,9 @@ constexpr int kVeryBigCost = (INT_MAX >> 2);
 // Runs viterbi algorithm at position |pos|.
 // |right_boundary| is the boundary of the current segment.
 template <typename TConnector>
-inline void ViterbiInternal(TConnector& conn, size_t pos, size_t right_boundary,
+inline void ViterbiInternal(TConnector& conn,
+                            const LexicalTransitionBonus::Snapshot& lexical,
+                            size_t pos, size_t right_boundary,
                             Lattice* lattice) {
   for (Node* rnode : lattice->begin_nodes(pos)) {
     if (rnode->end_pos > right_boundary) {
@@ -771,13 +776,17 @@ inline void ViterbiInternal(TConnector& conn, size_t pos, size_t right_boundary,
         rnode->prev = nullptr;
       } else {
         rnode->prev = rnode->constrained_prev;
+        const int pos_cost =
+            conn.GetTransitionCost(rnode->prev->rid, rnode->lid);
         rnode->cost = rnode->prev->cost + rnode->wcost +
-                      conn.GetTransitionCost(rnode->prev->rid, rnode->lid);
+                      lexical.Apply(pos_cost, rnode->prev->value, rnode->value);
       }
       continue;
     }
 
     // Find a valid node which connects to the rnode with minimum cost.
+    // Surface bonus is applied outside CachingConnector, which keys only on
+    // POS ids.
     int best_cost = kVeryBigCost;
     Node* best_node = nullptr;
     for (Node* lnode : lattice->end_nodes(pos)) {
@@ -786,7 +795,9 @@ inline void ViterbiInternal(TConnector& conn, size_t pos, size_t right_boundary,
         continue;
       }
 
-      int cost = lnode->cost + conn.GetTransitionCost(lnode->rid, rnode->lid);
+      const int pos_cost = conn.GetTransitionCost(lnode->rid, rnode->lid);
+      const int cost =
+          lnode->cost + lexical.Apply(pos_cost, lnode->value, rnode->value);
       if (cost < best_cost) {
         best_cost = cost;
         best_node = lnode;
@@ -804,6 +815,7 @@ bool ImmutableConverter::Viterbi(const ConversionOptions& options,
                                  const Segments& segments,
                                  Lattice* lattice) const {
   absl::string_view key = lattice->key();
+  const LexicalTransitionBonus::Snapshot lexical = lexical_bonus_.GetSnapshot();
 
   // Process BOS.
   {
@@ -820,8 +832,10 @@ bool ImmutableConverter::Viterbi(const ConversionOptions& options,
       DCHECK(rnode->constrained_prev == nullptr);
 
       rnode->prev = bos_node;
+      const int pos_cost =
+          connector_.GetTransitionCost(bos_node->rid, rnode->lid);
       rnode->cost = bos_node->cost +
-                    connector_.GetTransitionCost(bos_node->rid, rnode->lid) +
+                    lexical.Apply(pos_cost, bos_node->value, rnode->value) +
                     rnode->wcost;
     }
   }
@@ -836,7 +850,7 @@ bool ImmutableConverter::Viterbi(const ConversionOptions& options,
       const size_t right_boundary =
           left_boundary + segments.segment(0).key().size();
       for (size_t pos = left_boundary + 1; pos < right_boundary; ++pos) {
-        ViterbiInternal(conn, pos, right_boundary, lattice);
+        ViterbiInternal(conn, lexical, pos, right_boundary, lattice);
       }
       left_boundary = right_boundary;
     }
@@ -845,7 +859,7 @@ bool ImmutableConverter::Viterbi(const ConversionOptions& options,
       // Run Viterbi for each position the segment.
       const size_t right_boundary = left_boundary + segment.key().size();
       for (size_t pos = left_boundary; pos < right_boundary; ++pos) {
-        ViterbiInternal(conn, pos, right_boundary, lattice);
+        ViterbiInternal(conn, lexical, pos, right_boundary, lattice);
       }
       left_boundary = right_boundary;
     }
@@ -881,8 +895,10 @@ bool ImmutableConverter::Viterbi(const ConversionOptions& options,
         continue;
       }
 
-      int cost =
-          lnode->cost + connector_.GetTransitionCost(lnode->rid, eos_node->lid);
+      const int pos_cost =
+          connector_.GetTransitionCost(lnode->rid, eos_node->lid);
+      const int cost =
+          lnode->cost + lexical.Apply(pos_cost, lnode->value, eos_node->value);
       if (cost < best_cost) {
         best_cost = cost;
         best_node = lnode;
@@ -1043,6 +1059,52 @@ void PredictionViterbiInternalImpl(TConnector& connector, size_t pos,
   }
 }
 
+// POS contraction keeps one left node per rid, so it cannot see a surface
+// bonus. When the bonus table is non-empty, score every left node.
+template <typename TConnector>
+void PredictionViterbiPerNode(TConnector& connector,
+                              const LexicalTransitionBonus::Snapshot& lexical,
+                              size_t pos, int calc_end_pos, Lattice* lattice) {
+  for (Node* rnode : lattice->begin_nodes(pos)) {
+    if (rnode->end_pos > static_cast<size_t>(calc_end_pos)) {
+      rnode->prev = nullptr;
+      continue;
+    }
+    connector.ResetCacheIfNecessary(rnode->lid);
+    if (rnode->constrained_prev != nullptr) {
+      if (rnode->constrained_prev->prev == nullptr &&
+          rnode->constrained_prev->node_type != Node::BOS_NODE) {
+        rnode->prev = nullptr;
+      } else {
+        rnode->prev = rnode->constrained_prev;
+        const int pos_cost =
+            connector.GetTransitionCost(rnode->prev->rid, rnode->lid);
+        rnode->cost =
+            rnode->prev->cost + rnode->wcost +
+            lexical.Apply(pos_cost, rnode->prev->value, rnode->value);
+      }
+      continue;
+    }
+
+    int best_cost = kVeryBigCost;
+    Node* best_node = nullptr;
+    for (Node* lnode : lattice->end_nodes(pos)) {
+      if (lnode->prev == nullptr && lnode->node_type != Node::BOS_NODE) {
+        continue;
+      }
+      const int pos_cost = connector.GetTransitionCost(lnode->rid, rnode->lid);
+      const int cost =
+          lnode->cost + lexical.Apply(pos_cost, lnode->value, rnode->value);
+      if (cost < best_cost) {
+        best_cost = cost;
+        best_node = lnode;
+      }
+    }
+    rnode->prev = best_node;
+    rnode->cost = best_cost + rnode->wcost;
+  }
+}
+
 }  // namespace
 
 void ImmutableConverter::PredictionViterbiInternal(
@@ -1052,11 +1114,17 @@ void ImmutableConverter::PredictionViterbiInternal(
   BestMap lbest, rbest;
   lbest.reserve(128);
   rbest.reserve(128);
+  const LexicalTransitionBonus::Snapshot lexical = lexical_bonus_.GetSnapshot();
 
   auto run_viterbi_loop = [&](auto& conn) {
-    for (size_t pos = calc_begin_pos; pos <= calc_end_pos; ++pos) {
-      PredictionViterbiInternalImpl(conn, pos, calc_end_pos, lattice, &lbest,
-                                    &rbest);
+    for (size_t pos = calc_begin_pos; pos <= static_cast<size_t>(calc_end_pos);
+         ++pos) {
+      if (lexical.empty()) {
+        PredictionViterbiInternalImpl(conn, pos, calc_end_pos, lattice, &lbest,
+                                      &rbest);
+      } else {
+        PredictionViterbiPerNode(conn, lexical, pos, calc_end_pos, lattice);
+      }
     }
   };
 
@@ -1497,16 +1565,17 @@ void ImmutableConverter::InsertCandidates(const ConversionOptions& options,
                                           absl::Span<const uint16_t> group,
                                           size_t max_candidates_size,
                                           InsertCandidatesType type) const {
+  const LexicalTransitionBonus::Snapshot lexical = lexical_bonus_.GetSnapshot();
   if (options.particle_omission_transition_cost_bonus == 0) {
     CachingConnector<false> conn(connector_, 0, pos_matcher_);
     InsertCandidatesImpl(conn, options, segments, lattice, group,
-                         max_candidates_size, type);
+                         max_candidates_size, type, lexical);
   } else {
     CachingConnector<true> conn(connector_,
                                 options.particle_omission_transition_cost_bonus,
                                 pos_matcher_);
     InsertCandidatesImpl(conn, options, segments, lattice, group,
-                         max_candidates_size, type);
+                         max_candidates_size, type, lexical);
   }
 }
 
@@ -1514,7 +1583,8 @@ template <typename TConnector>
 void ImmutableConverter::InsertCandidatesImpl(
     TConnector& conn, const ConversionOptions& options, Segments* segments,
     const Lattice& lattice, absl::Span<const uint16_t> group,
-    size_t max_candidates_size, InsertCandidatesType type) const {
+    size_t max_candidates_size, InsertCandidatesType type,
+    const LexicalTransitionBonus::Snapshot& lexical) const {
   // skip HIS_NODE(s)
   const Node* absl_nonnull prev = lattice.bos_node();
   for (Node* node = lattice.bos_node()->next;
@@ -1530,7 +1600,7 @@ void ImmutableConverter::InsertCandidatesImpl(
 
   NBestGenerator<TConnector> nbest_generator(user_dictionary_, segmenter_, conn,
                                              pos_matcher_, lattice,
-                                             suggestion_filter_);
+                                             suggestion_filter_, &lexical);
 
   std::string original_key;
   for (const Segment& segment : segments->conversion_segments()) {
@@ -1758,6 +1828,12 @@ bool ImmutableConverter::Convert(const ConversionOptions& options,
       LOG(WARNING) << "viterbi failed";
       return false;
     }
+    MaybeSelectGlobalPath(
+        options.request_type,
+        [&](uint16_t rid, uint16_t lid) {
+          return connector_.GetTransitionCost(rid, lid);
+        },
+        lexical_bonus_.GetSnapshot(), word_ngram_, lattice);
   }
 
   MOZC_VLOG(2) << lattice->DebugString();

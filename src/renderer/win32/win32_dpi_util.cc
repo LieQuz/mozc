@@ -44,9 +44,9 @@ namespace renderer {
 namespace win32 {
 namespace {
 
-constexpr int kCornerRadiusAt96Dpi = 8;
-constexpr int kColumnGapAt96Dpi = 6;
-constexpr int kRowPaddingAt96Dpi = 6;
+constexpr int kCornerRadiusAt96Dpi = 12;
+constexpr int kColumnGapAt96Dpi = 10;
+constexpr int kRowPaddingAt96Dpi = 3;
 constexpr wchar_t kUiFontFace[] = L"Yu Gothic UI";
 
 struct Rgb {
@@ -135,16 +135,6 @@ bool TryGetAccentColor(Rgb* accent) {
   return true;
 }
 
-Rgb Blend(Rgb base, Rgb accent, double accent_amount) {
-  const auto channel = [accent_amount](int base_channel, int accent_channel) {
-    const double mixed = base_channel * (1.0 - accent_amount) +
-                         accent_channel * accent_amount;
-    return std::clamp(static_cast<int>(std::lround(mixed)), 0, 255);
-  };
-  return Rgb{channel(base.r, accent.r), channel(base.g, accent.g),
-             channel(base.b, accent.b)};
-}
-
 void ApplyFontFace(RendererStyle::TextStyle* text_style) {
   if (GetUiFontFaceName() == nullptr) {
     return;
@@ -171,7 +161,8 @@ void ApplyWindowsVisualStyle(RendererStyle* style) {
                          colors.separator_b};
 
   style->set_row_rect_padding(kRowPaddingAt96Dpi);
-  style->set_scrollbar_width(6);
+  style->set_scrollbar_width(8);
+  style->set_window_border(8);
   SetColor(style->mutable_border_color(), border);
   SetColor(style->mutable_focused_background_color(), focused);
   SetColor(style->mutable_focused_border_color(), focused);
@@ -240,49 +231,27 @@ const wchar_t* GetUiFontFaceName() {
 
 WindowsUiColors GetWindowsUiColors() {
   const bool dark = AppsUseDarkTheme();
-  const Rgb background = dark ? Rgb{44, 44, 44} : Rgb{255, 255, 255};
-  const Rgb light_focus_fallback = {209, 234, 255};
-  const Rgb dark_focus_fallback = {36, 64, 92};
-  Rgb focused = dark ? dark_focus_fallback : light_focus_fallback;
+  // Solid accent, the same role as macOS selectedContentBackgroundColor.
+  // Selected row text is drawn white on top of this.
+  const Rgb light_focus = {0, 122, 255};
+  const Rgb dark_focus = {10, 132, 255};
+  Rgb focused = dark ? dark_focus : light_focus;
   Rgb accent = {};
   if (TryGetAccentColor(&accent)) {
-    focused = Blend(background, accent, dark ? 0.38 : 0.28);
+    focused = accent;
   }
 
   if (dark) {
     return WindowsUiColors{
-        background.r, background.g, background.b, 70,  70,  70,  255, 255, 255,
-        180,          180,          180,          200, 200, 200, focused.r,
-        focused.g,    focused.b,    32,           32,  32,  140, 140, 140, 70,
-        70,           70};
+        44,  44,  46,  72,  72,  74,  245, 245, 247, 152, 152,       157,
+        152, 152, 157, focused.r, focused.g, focused.b, 44,  44,  46,  99,
+        99,  102, 72,  72,  74};
   }
-  return WindowsUiColors{background.r,
-                         background.g,
-                         background.b,
-                         229,
-                         229,
-                         229,
-                         32,
-                         32,
-                         32,
-                         110,
-                         110,
-                         110,
-                         96,
-                         96,
-                         96,
-                         focused.r,
-                         focused.g,
-                         focused.b,
-                         240,
-                         240,
-                         240,
-                         180,
-                         180,
-                         180,
-                         229,
-                         229,
-                         229};
+  return WindowsUiColors{255,         255,         255,         210, 210, 215,
+                         29,          29,          31,          142, 142, 147,
+                         142,         142,         147,         focused.r,
+                         focused.g,   focused.b,   255,         255, 255, 199,
+                         199,         204,         229,         229, 234};
 }
 
 void GetScaledRendererStyle(::mozc::renderer::RendererStyle* style,
@@ -292,7 +261,8 @@ void GetScaledRendererStyle(::mozc::renderer::RendererStyle* style,
   RendererStyleHandler::GetRendererStyle(style);
   ApplyWindowsVisualStyle(style);
 
-  // style->window_border is non-scalable.
+  style->set_window_border(std::max(
+      8, static_cast<int>(std::lround(style->window_border() * scale_factor))));
   style->set_scrollbar_width(style->scrollbar_width() * scale_factor);
   style->set_row_rect_padding(style->row_rect_padding() * scale_factor);
 

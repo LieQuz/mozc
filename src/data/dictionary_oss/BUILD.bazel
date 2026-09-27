@@ -44,6 +44,8 @@ exports_files(
     srcs = [
         "collocation.txt",
         "collocation_suppression.txt",
+        "lexical_transition_bonus.tsv",
+        "word_ngram.tsv",
         "connection_single_column.txt",
         "reading_correction.tsv",
         "suffix.txt",

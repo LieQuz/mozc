@@ -114,6 +114,10 @@ mozc_dataset(
     zero_query_number_def = (
         "//data/zero_query:zero_query_number.def"
     ),
+    extra_data = [
+        "lexb:32://data/dictionary_oss:lexical_transition_bonus.tsv",
+        "ngrm:32://data/dictionary_oss:word_ngram.tsv",
+    ],
 )
 
 mozc_cc_library(

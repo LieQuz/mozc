@@ -96,9 +96,12 @@ class TextRenderer {
   // Renders the given |text|.
   virtual void RenderText(HDC dc, std::wstring_view text, const Rect& rect,
                           FONT_TYPE font_type) const = 0;
+  // |color| of CLR_INVALID keeps the style color. A real COLORREF is used for
+  // the focused row, which is drawn in white on the accent pill.
   virtual void RenderTextList(HDC dc,
                               absl::Span<const TextRenderingInfo> display_list,
-                              FONT_TYPE font_type) const = 0;
+                              FONT_TYPE font_type,
+                              COLORREF color = CLR_INVALID) const = 0;
 };
 
 }  // namespace win32

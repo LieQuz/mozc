@@ -348,6 +348,7 @@ bool UserHistoryPredictor::Reload() {
 
 bool UserHistoryPredictor::ClearAllHistory() {
   storage_.Clear();  // Clear is blocking.
+  modules_.GetLexicalTransitionBonus().ClearUserPairs();
   return true;
 }
 
@@ -2108,6 +2109,26 @@ void UserHistoryPredictor::Finish(const ConversionRequest& request,
     revert_entries.result = results.front();
     revert_cache_.Insert(revert_id, std::move(revert_entries));
   }
+
+  // Surface pairs from an explicit commit. Shown-but-not-selected candidates
+  // return earlier via NO_SUGGEST_LEARNING or never reach Finish.
+  std::vector<absl::string_view> committed_values;
+  const absl::string_view history_value = request.converter_history_value(1);
+  if (!history_value.empty()) {
+    committed_values.push_back(history_value);
+  }
+  bool saw_inner = false;
+  for (const auto& inner : results.front().inner_segments()) {
+    if (!inner.GetValue().empty()) {
+      committed_values.push_back(inner.GetValue());
+      saw_inner = true;
+    }
+  }
+  if (!saw_inner && !results.front().value.empty()) {
+    committed_values.push_back(results.front().value);
+  }
+  modules_.GetLexicalTransitionBonus().NoteCommittedSequence(revert_id,
+                                                             committed_values);
 }
 
 UserHistoryPredictor::SegmentsForLearning
@@ -2396,6 +2417,7 @@ void UserHistoryPredictor::InsertHistoryForConversionSegments(
 }
 
 void UserHistoryPredictor::Revert(uint32_t revert_id) {
+  modules_.GetLexicalTransitionBonus().Revert(revert_id);
   if (storage_.IsSyncerInCriticalSection()) {
     MOZC_VLOG(2) << "Syncer is running";
     return;

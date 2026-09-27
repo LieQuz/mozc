@@ -214,6 +214,16 @@ COLORREF ToColorRef(const RendererStyle::RGBAColor& color) {
   return RGB(color.r(), color.g(), color.b());
 }
 
+// White on a saturated accent, near-black when the accent itself is pale.
+COLORREF SelectedTextColor(const RendererStyle::RGBAColor& background) {
+  const double luminance =
+      0.299 * background.r() + 0.587 * background.g() + 0.114 * background.b();
+  if (luminance > 170.0) {
+    return RGB(29, 29, 31);
+  }
+  return RGB(255, 255, 255);
+}
+
 bool SameRgb(const RendererStyle::RGBAColor& left,
              const RendererStyle::RGBAColor& right) {
   return left.r() == right.r() && left.g() == right.g() && left.b() == right.b();
@@ -712,21 +722,35 @@ void CandidateWindow::DrawCells(HDC dc) {
                                           TextRenderer::FONTSET_DESCRIPTION};
 
   DCHECK_EQ(std::size(kColumnTypes), std::size(kFontTypes));
+  const int focused_array_index = GetFocusedArrayIndex(*candidate_window_);
   for (size_t type_index = 0; type_index < std::size(kColumnTypes);
        ++type_index) {
     const COLUMN_TYPE column_type = kColumnTypes[type_index];
     const TextRenderer::FONT_TYPE font_type = kFontTypes[type_index];
 
-    std::vector<TextRenderingInfo> display_list;
+    std::vector<TextRenderingInfo> resting;
+    std::vector<TextRenderingInfo> focused;
     for (size_t i = 0; i < candidate_window_->candidate_size(); ++i) {
       const commands::CandidateWindow::Candidate& candidate =
           candidate_window_->candidate(i);
       const std::wstring display_string =
           GetDisplayStringByColumn(candidate, column_type);
       const Rect text_rect = table_layout_->GetCellRect(i, column_type);
-      display_list.push_back(TextRenderingInfo(display_string, text_rect));
+      TextRenderingInfo info(display_string, text_rect);
+      if (static_cast<int>(i) == focused_array_index) {
+        focused.push_back(std::move(info));
+      } else {
+        resting.push_back(std::move(info));
+      }
     }
-    text_renderer_->RenderTextList(dc, display_list, font_type);
+    if (!resting.empty()) {
+      text_renderer_->RenderTextList(dc, resting, font_type);
+    }
+    if (!focused.empty()) {
+      text_renderer_->RenderTextList(
+          dc, focused, font_type,
+          SelectedTextColor(style_.focused_background_color()));
+    }
   }
 }
 
@@ -740,15 +764,15 @@ void CandidateWindow::DrawVScrollBar(HDC dc) {
     const int end_index =
         candidate_window_->candidate(candidates_in_page - 1).index();
 
-    const CRect background_crect = ToCRect(vscroll_rect);
-    FillSolidRect(dc, &background_crect,
+    const int radius =
+        std::max(2, static_cast<int>(std::lround(3 * GetDPIScalingFactor(dpi_))));
+    FillRoundRect(dc, ToCRect(vscroll_rect), radius,
                   ToColorRef(style_.scrollbar_background_color()));
 
     const mozc::Rect& indicator_rect = table_layout_->GetVScrollIndicatorRect(
         begin_index, end_index, candidates_total);
 
-    const CRect indicator_crect = ToCRect(indicator_rect);
-    FillSolidRect(dc, &indicator_crect,
+    FillRoundRect(dc, ToCRect(indicator_rect), radius,
                   ToColorRef(style_.scrollbar_indicator_color()));
   }
 }
@@ -785,11 +809,13 @@ void CandidateWindow::DrawFooter(HDC dc) {
   {
     wil::unique_select_object prev_pen =
         wil::SelectObject(dc, static_cast<HPEN>(::GetStockObject(DC_PEN)));
+    const int inset = std::max(
+        8, static_cast<int>(std::lround(10 * GetDPIScalingFactor(dpi_))));
     for (size_t i = 0, y = footer_rect.Top(); i < footer_separator_height;
          y++, i++) {
       ::SetDCPenColor(dc, ToColorRef(style_.footer_border_colors(i)));
-      ::MoveToEx(dc, footer_rect.Left(), y, nullptr);
-      ::LineTo(dc, footer_rect.Right(), y);
+      ::MoveToEx(dc, footer_rect.Left() + inset, y, nullptr);
+      ::LineTo(dc, footer_rect.Right() - inset, y);
     }
   }
 
@@ -898,11 +924,11 @@ void CandidateWindow::DrawSelectedRect(HDC dc) {
 
     CRect selected_rect =
         ToCRect(table_layout_->GetRowRect(focused_array_index));
-    const int inset = std::max(1, static_cast<int>(std::lround(
-                                      2 * GetDPIScalingFactor(dpi_))));
-    selected_rect.DeflateRect(inset, inset);
-    const int radius =
-        std::max(2, GetWindowCornerRadiusPx(dpi_) / 2);
+    const double scale = GetDPIScalingFactor(dpi_);
+    const int inset_x = std::max(4, static_cast<int>(std::lround(6 * scale)));
+    const int inset_y = std::max(2, static_cast<int>(std::lround(2 * scale)));
+    selected_rect.DeflateRect(inset_x, inset_y);
+    const int radius = std::max(6, static_cast<int>(std::lround(8 * scale)));
     FillRoundRect(dc, selected_rect, radius,
                   ToColorRef(style_.focused_background_color()));
   }
@@ -913,14 +939,20 @@ void CandidateWindow::DrawInformationIcon(HDC dc) {
   const double scale_factor = GetDPIScalingFactor(dpi_);
   for (size_t i = 0; i < candidate_window_->candidate_size(); ++i) {
     if (candidate_window_->candidate(i).has_information_id()) {
-      CRect rect = ToCRect(table_layout_->GetRowRect(i));
-      rect.left = rect.right - (6.0 * scale_factor);
-      rect.right = rect.right - (2.0 * scale_factor);
-      rect.top += (2.0 * scale_factor);
-      rect.bottom -= (2.0 * scale_factor);
-      FillSolidRect(dc, &rect, ToColorRef(style_.scrollbar_indicator_color()));
-      ::SetDCBrushColor(dc, ToColorRef(style_.scrollbar_indicator_color()));
-      ::FrameRect(dc, &rect, static_cast<HBRUSH>(::GetStockObject(DC_BRUSH)));
+      CRect row = ToCRect(table_layout_->GetRowRect(i));
+      const int marker = std::max(4, static_cast<int>(std::lround(4 * scale_factor)));
+      const int margin = std::max(8, static_cast<int>(std::lround(10 * scale_factor)));
+      RECT dot = {row.right - margin - marker,
+                  row.top + (row.Height() - marker) / 2, 0, 0};
+      dot.right = dot.left + marker;
+      dot.bottom = dot.top + marker;
+      wil::unique_hbrush brush(
+          ::CreateSolidBrush(ToColorRef(style_.description_style().foreground_color())));
+      wil::unique_hpen pen(::CreatePen(
+          PS_SOLID, 1, ToColorRef(style_.description_style().foreground_color())));
+      wil::unique_select_object old_brush(wil::SelectObject(dc, brush.get()));
+      wil::unique_select_object old_pen(wil::SelectObject(dc, pen.get()));
+      ::Ellipse(dc, dot.left, dot.top, dot.right, dot.bottom);
     }
   }
 }

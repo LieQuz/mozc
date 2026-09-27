@@ -1,0 +1,4 @@
+# key	expected_value	expected_segments	domain
+# expected_segments is '|' separated and must concatenate to expected_value.
+これはうれしいごさんです	これは嬉しい誤算です	これ|は|嬉しい|誤算|です	general
+おれかかったえだをもとにもどす	折れかかった枝を元に戻す	折れかかった|枝|を|元|に|戻す	general

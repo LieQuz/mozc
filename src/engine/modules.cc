@@ -42,7 +42,9 @@
 #include "absl/types/span.h"
 #include "base/container/tuple.h"
 #include "converter/connector.h"
+#include "converter/lexical_transition_bonus.h"
 #include "converter/segmenter.h"
+#include "converter/word_ngram.h"
 #include "data_manager/data_manager.h"
 #include "dictionary/dictionary_impl.h"
 #include "dictionary/dictionary_interface.h"
@@ -148,6 +150,13 @@ absl::Status Modules::Init(std::unique_ptr<const DataManager> data_manager) {
     return std::move(status_or_connector).status();
   }
   connector_ = *std::move(status_or_connector);
+
+  lexical_transition_bonus_ = std::make_unique<LexicalTransitionBonus>();
+  lexical_transition_bonus_->LoadStatic(data_manager_->GetLexicalBonusData());
+  word_ngram_ = std::make_unique<WordNgram>();
+  word_ngram_->Load(data_manager_->GetWordNgramData());
+  RETURN_IF_NULL(lexical_transition_bonus_);
+  RETURN_IF_NULL(word_ngram_);
 
   segmenter_ =
       make_unique_from_tuples<Segmenter>(data_manager_->GetSegmenterData());

@@ -39,11 +39,13 @@
 #include "converter/connector.h"
 #include "converter/immutable_converter_interface.h"
 #include "converter/lattice.h"
+#include "converter/lexical_transition_bonus.h"
 #include "converter/nbest_generator.h"
 #include "converter/node.h"
 #include "converter/node_list_builder.h"
 #include "converter/segmenter.h"
 #include "converter/segments.h"
+#include "converter/word_ngram.h"
 #include "dictionary/dictionary_interface.h"
 #include "dictionary/pos_group.h"
 #include "dictionary/pos_matcher.h"
@@ -131,11 +133,11 @@ class ImmutableConverter : public ImmutableConverterInterface {
                         InsertCandidatesType type) const;
 
   template <typename TConnector>
-  void InsertCandidatesImpl(TConnector& conn, const ConversionOptions& options,
-                            Segments* segments, const Lattice& lattice,
-                            absl::Span<const uint16_t> group,
-                            size_t max_candidates_size,
-                            InsertCandidatesType type) const;
+  void InsertCandidatesImpl(
+      TConnector& conn, const ConversionOptions& options, Segments* segments,
+      const Lattice& lattice, absl::Span<const uint16_t> group,
+      size_t max_candidates_size, InsertCandidatesType type,
+      const LexicalTransitionBonus::Snapshot& lexical) const;
 
   void InsertCandidatesForRealtimeWithCandidateChecker(
       const ConversionOptions& options, const Lattice& lattice,
@@ -166,7 +168,9 @@ class ImmutableConverter : public ImmutableConverterInterface {
         lnode != rnode->constrained_prev) {
       return kInvalidPenaltyCost;
     }
-    return connector_.GetTransitionCost(lnode->rid, rnode->lid) + rnode->wcost;
+    const int pos_cost = connector_.GetTransitionCost(lnode->rid, rnode->lid);
+    return lexical_bonus_.Apply(pos_cost, lnode->value, rnode->value) +
+           rnode->wcost;
   }
 
   void InsertCandidatesForConversion(const ConversionOptions& options,
@@ -187,6 +191,8 @@ class ImmutableConverter : public ImmutableConverterInterface {
   const dictionary::PosMatcher& pos_matcher_;
   const dictionary::PosGroup& pos_group_;
   const SuggestionFilter& suggestion_filter_;
+  const LexicalTransitionBonus& lexical_bonus_;
+  const WordNgram& word_ngram_;
 
   // Cache for POS ids.
   const uint16_t first_name_id_;
