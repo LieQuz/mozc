@@ -58,6 +58,9 @@
 #include "protocol/segmenter_data.pb.h"
 
 namespace mozc {
+
+DataManager::~DataManager() = default;
+
 namespace {
 
 #ifdef GOOGLE_JAPANESE_INPUT_BUILD

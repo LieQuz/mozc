@@ -40,6 +40,7 @@ namespace oss {
 class OssDataManager : public DataManager {
  public:
   OssDataManager();
+  ~OssDataManager() override;
   OssDataManager(const OssDataManager&) = delete;
   OssDataManager& operator=(const OssDataManager&) = delete;
 };

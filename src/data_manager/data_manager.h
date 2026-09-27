@@ -79,7 +79,11 @@ class DataManager {
 
   DataManager(const DataManager&) = delete;
   DataManager& operator=(const DataManager&) = delete;
-  virtual ~DataManager() = default;
+  // Out of line so this translation unit owns the vtable. An inline destructor
+  // emits the vtable in every caller, and a stale copy skips virtual methods
+  // added later. On arm64 that calls GetCollocationData instead of
+  // GetSystemDictionaryData and stores the result into read-only text.
+  virtual ~DataManager();
 
   virtual std::optional<std::string> GetFilename() const { return filename_; }
 
